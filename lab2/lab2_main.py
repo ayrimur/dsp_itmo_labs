@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 Реализовать вычисление дискретного преобразования Фурье для типовых после-
 довательностей (единичный импульс, единичный скачок, синусоидальное колебание).
 '''
-
+"""
 
 def fourier_transform(x):
     N = x.size
@@ -57,7 +57,7 @@ plt.title("Scipy фурье, синус")
 plt.plot(np.abs(sin_fourier))
 plt.show()
 
-
+"""
 '''
 С использованием дискретного преобразования Фурье проанализировать спектральный 
 состав сигнала паровозного гудка. Построить амплитудный спектр сигнала. Определить 
@@ -65,16 +65,26 @@ plt.show()
 '''
 
 whistle, sr = librosa.load('train_whistle.wav', 44100)
-whistle_fourier = scipy.fft.fft(whistle)
+N = whistle.shape[0]
+whistle_fourier = np.fft.fft(whistle)[:N//2]  # np.fft.fftshift()
+
+x_sine_wave_spectrum = np.linspace(0, sr / 2, len(whistle_fourier))
 
 whistle_A = np.abs(whistle_fourier)
-whistle_Ph = np.arctan2(whistle_fourier.imag, whistle_fourier.real)
-plt.plot(whistle_A)
-plt.title("Амплитудный спектр гудка")
+
+
+fig, axs = plt.subplots(2, 1, figsize=(8, 8))
+axs[0].plot(whistle_A)
+axs[0].set_xlabel('Время, сек')
+axs[0].set_ylabel('Амплитуда гудка')
+
+
+axs[1].plot(x_sine_wave_spectrum, np.arctan2(np.imag(whistle_fourier), np.real(whistle_fourier)))
+axs[1].set_xlabel('Частота, Гц')
+axs[1].set_ylabel('Фаза гудка')
+plt.subplots_adjust(hspace=0.5)
 plt.show()
-plt.plot(whistle_Ph)
-plt.title("Фазовый спектр гудка")
-plt.show()
+
 
 f = np.linspace(0, len(whistle) - 1, len(whistle))
 f *= sr / len(whistle)
@@ -87,26 +97,30 @@ print("Сигнал гудка: ", f[f_max_idxs])
 С использованием дискретного преобразования Фурье / оконного преобразования Фурье 
 построить амплитудный спектр / спектрограмму сигнала первого спутника (04.10.1957, СССР). 
 '''
-sputnik_1, sr = librosa.load('sputnik_1.wav', 44100)
-sputnik_1_fourier = scipy.fft.fft(sputnik_1)
+signal, sr = librosa.load('sputnik_1.wav')
+N = signal.shape[0]
 
-sputnik_1_A = np.abs(sputnik_1_fourier)
-plt.plot(sputnik_1_A)
-plt.title("Амплитудный спектр спутника")
+fourier_image = scipy.fft.fft(signal, workers=8)
+
+fig, axs = plt.subplots(3, 1, figsize=(8, 8))
+axs[0].plot(np.arange(N) / sr, signal)
+axs[0].set_xlabel('Время, сек')
+axs[0].set_ylabel('Амплитуда спутника')
+
+axs[1].plot(np.angle(fourier_image)[:N // 2], linewidth=0.5)
+axs[1].set_xlabel('Частота, Гц')
+axs[1].set_ylabel('Фаза спутника')
+
+f, t, S = scipy.signal.spectrogram(signal, sr, window='hamming', return_onesided=True, mode='magnitude')
+
+axs[2].pcolormesh(t, f, S, shading='gouraud')
+axs[2].set_xlabel('Время, сек')
+axs[2].set_ylabel('Спектрогамма')
+plt.subplots_adjust(hspace=0.5)
 plt.show()
 
-sputnik_1_Ph = np.arctan2(sputnik_1_fourier.imag, sputnik_1_fourier.real)
-plt.plot(sputnik_1_Ph)
-plt.title("Фазовый спектр спутника")
-plt.show()
 
-f, t, S = scipy.signal.spectrogram(sputnik_1, sr, window='hamming', return_onesided=True, mode='magnitude')
-plt.pcolormesh(t, f, S, shading='gouraud')
-plt.ylabel('Частота, Гц')
-plt.xlabel('Время, сек')
-plt.title("Спектрограмма спутника")
-plt.show()
-
+"""
 '''
 Проанализировать с использованием оконного преобразования Фурье двухтональный 
 многочастотный сигнал (Dual-Tone Multi-Frequency, DTMF). Определить «номер телефона» 
@@ -159,80 +173,98 @@ sf.write("voice_from_amplitude.wav", np.abs(scipy.fft.ifft(np.abs(my_voice_fouri
 my_voice_fourier.real = 1
 sf.write("voice_from_phase.wav", np.abs(scipy.fft.ifft(np.arctan2(my_voice_fourier.imag, my_voice_fourier.real))), sr)
 
-
+"""
 '''
 Для некоторого речевого сигнала реализовать алгоритм построения мел-частотных 
 кепстральных коэффициентов (Mel-Frequency Cepstral Coefficients, MFCCs).
 '''
 
+from skimage.util import view_as_windows
+from functools import partial
 
-def frame_audio(audio, FFT_size=2048, hop_size=10, sr=44100):
-    audio = np.pad(audio, int(FFT_size / 2), mode='reflect')
-    frame_len = np.round(sr * hop_size / 1000).astype(int)
-    frame_num = int((len(audio) - FFT_size) / frame_len) + 1
-    frames = np.zeros((frame_num, FFT_size))
-    for i in range(frame_num):
-        frames[i] = audio[i * frame_len:i * frame_len + FFT_size]
-    return frames
+def _compute_filterbank(n_mfcc, win_len, sample_rate):
 
+    # Declare convertation functions
+    freq_to_mel = lambda x: 2595.0 * np.log10(1.0 + x / 700.0)
+    mel_to_freq = lambda x: 700 * (10 ** (x / 2595.0) - 1.0)
 
-def freq_to_mel(freq):
-    return 2595.0 * np.log10(1.0 + freq / 700.0)
-
-
-def mel_to_freq(mels):
-    return 700.0 * (10.0**(mels / 2595.0) - 1.0)
-
-
-def get_filter_points(fmin, fmax, mel_filter_num, FFT_size, sample_rate=44100):
-    fmin_mel = freq_to_mel(fmin)
-    fmax_mel = freq_to_mel(fmax)
-    mels = np.linspace(fmin_mel, fmax_mel, num=mel_filter_num + 2)
+    # Compute filterbank markup
+    mel_min = freq_to_mel(0)
+    mel_max = freq_to_mel(sample_rate)
+    mels = np.linspace(mel_min, mel_max, n_mfcc)
     freqs = mel_to_freq(mels)
-    return np.floor((FFT_size + 1) / sample_rate * freqs).astype(int), freqs
+    filter_points = np.floor(freqs * (win_len // 2 + 1) / sample_rate).astype(np.int)
 
+    # Compute filters
+    filters = np.zeros([filter_points.shape[0], int(win_len / 2 + 1)])
+    for i in range(1, filter_points.shape[0] - 1):
+        filters[i, filter_points[i - 1]: filter_points[i]] = np.linspace(0, 1, filter_points[i] - filter_points[i - 1])
+        filters[i, filter_points[i]: filter_points[i + 1]] = np.linspace(1, 0, filter_points[i + 1] - filter_points[i])
 
-def get_filters(filter_points, FFT_size):
-    filters = np.zeros((len(filter_points) - 2, FFT_size // 2 + 1))
-
-    for n in range(len(filter_points) - 2):
-        filters[n, filter_points[n]: filter_points[n + 1]] = np.linspace(0, 1, filter_points[n + 1] - filter_points[n])
-        filters[n, filter_points[n + 1]: filter_points[n + 2]] = np.linspace(1, 0, filter_points[n + 2] - filter_points[
-            n + 1])
+    filters = filters[:, :-1]
     return filters
 
 
-human_speech, sr = librosa.load('human_speech.wav', 44100)
+def mfcc(n_mfcc, signal, sample_rate, win_len, win_step, window_function, use_dct=True):
+    # Split into frames and apply window function
+    frames = view_as_windows(signal, window_shape=(win_len,), step=win_step)
+    w_funcs = {'hanning': np.hanning, 'hamming': np.hamming, 'bartlett': np.bartlett,
+               'kaiser': partial(np.kaiser, beta=3), 'blackman': np.blackman}
+    frames = frames * w_funcs[window_function](win_len + 1)[:-1]
 
-human_speech_framed = frame_audio(human_speech, FFT_size=2048, hop_size=10, sr=sr)
-window = scipy.signal.get_window("hamming", 2048, fftbins=True)
-human_speech_framed *= window
-human_speech_framed_ = np.transpose(human_speech_framed)
+    # Compute power spectrum (periodogram)
+    frames = frames.T
+    spectrum = scipy.fft.fft(frames, axis=0, workers=8)[:int(win_len / 2)]
+    spectrum = np.flip(spectrum, axis=0)
+    power_spectrum = np.abs(spectrum) ** 2
 
-audio_fft = np.empty((1 + 2048 // 2, human_speech_framed_.shape[1]), dtype=np.complex64, order='F')
+    # Compute mel-filterbank
+    filterbank = _compute_filterbank(n_mfcc, win_len, sample_rate)
+    print(filterbank.shape)
 
-for n in range(audio_fft.shape[1]):
-    audio_fft[:, n] = scipy.fft.fft(human_speech_framed_[:, n], axis=0)[:audio_fft.shape[0]]
+    # Apply filterbank
+    filtered_spectrum = np.dot(filterbank, power_spectrum).T
+    log_spectrum = 10.0 * np.log10(filtered_spectrum)
+    log_spectrum = log_spectrum[:, 1:-1]
 
-audio_fft = np.transpose(audio_fft)
-audio_fft_power = np.square(np.abs(audio_fft))
+    # Extract mfcc using dct-II
+    mfcc = scipy.fft.dct(log_spectrum, type=2, n=n_mfcc, workers=-1)
 
-filter_points, mel_freqs = get_filter_points(0, sr / 2, 10, 2048, 44100)
-filters = get_filters(filter_points, 2048)
+    return mfcc
 
-audio_filtered = np.dot(filters, np.transpose(audio_fft_power))
-audio_log = np.log10(audio_filtered)
+signal, sr = librosa.load('human_speech.wav', 44100)
 
+coefs = mfcc(
+    n_mfcc=23,
+    signal=signal,
+    sample_rate=sr,
+    win_len=2048,
+    win_step=512,
+    window_function='hamming',
+    use_dct=False
+).T
+'''plt.figure(figsize=(10, 5))
+plt.title("23 MFCC (My)")
+plt.imshow(coefs, aspect='auto', origin='lower', cmap='inferno')
+plt.show()
 
-def dct(dct_filter_num, filter_len):
-    basis = np.empty((dct_filter_num, filter_len))
-    basis[0, :] = 1.0 / np.sqrt(filter_len)
-    samples = np.arange(1, 2 * filter_len, 2) * np.pi / (2.0 * filter_len)
-    for i in range(1, dct_filter_num):
-        basis[i, :] = np.cos(i * samples) * np.sqrt(2.0 / filter_len)
-    return basis
+# Extract mfcc using librosa api
+coefs = librosa.feature.mfcc(signal, sr=sr, n_mfcc=23)
+plt.figure(figsize=(10, 5))
+plt.title("23 MFCC (librosa)")
+plt.imshow(coefs, aspect='auto', origin='lower', cmap='inferno')
+plt.show()'''
 
+print(coefs)
 
-plt.plot(np.dot(dct(10, 10), audio_log)[0])  # cepstral coefficients
-plt.title("MFCC")
+fig, axs = plt.subplots(2, 1, figsize=(8, 8))
+#axs[0].figure(figsize=(10, 5))
+axs[0].imshow(coefs, aspect='auto', origin='lower', cmap='inferno')
+axs[0].set_ylabel('My MFCC')
+
+coefs = librosa.feature.mfcc(signal, sr=sr, n_mfcc=23)
+#axs[1].figure(figsize=(10, 5))
+axs[1].imshow(coefs, aspect='auto', origin='lower', cmap='inferno')
+axs[1].set_ylabel('23 MFCC (librosa)')
+plt.subplots_adjust(hspace=0.5)
 plt.show()
